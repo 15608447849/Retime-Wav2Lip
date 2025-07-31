@@ -19,7 +19,7 @@ Easy-Wav2Lip 是一个改进版的 Wav2Lip 视频唇形同步工具，主要功�
 ```
 Easy-Wav2Lip/
 ├── 核心文件
-│   ├── inference.py              # 推理引擎
+│   ├── inference_cn.py              # 推理引擎
 ├── 模型文件
 │   └── models/
 │       ├── wav2lip.py            # Wav2Lip 模型定义
@@ -59,15 +59,12 @@ pip install torch==2.1.0+cu121 torchaudio==2.1.0+cu121 torchvision==0.16.0+cu121
 pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple
 
 conda install -c conda-forge cmake dlib -y
-# 下载模型
-python install.py
-# 配置config.ini 调试运行
-python inference_cn.py
+
 ```
 
 ### 使用方法：
-1. 配置 `config.ini` 文件，设置视频和音频路径
-2. 运行 `python run.py` 或使用 GUI 界面
+1. 下载模型 `python install.py`
+2. 运行 `python inference_cn.py`
 3. 等待处理完成，输出文件保存在视频同目录下
 
 ## 4. 项目核心类解读
@@ -91,34 +88,14 @@ class Wav2Lip(nn.Module):
 - 通过编码器提取特征，解码器生成同步的唇形
 - 支持批处理和时序处理
 
-### 4.2 推理引擎类 (`inference.py`)
+### 4.2 推理引擎类 (`inference_cn.py`)
 **主要函数**：
 - `face_detect()`: 人脸检测和跟踪
 - `datagen()`: 数据生成器，处理帧和音频
 - `create_mask()`: 创建面部遮罩用于融合
 - `main()`: 主推理流程
 
-### 4.3 配置管理 (`config.ini`)
-```ini
-[OPTIONS]
-video_file = 输入视频路径
-vocal_file = 输入音频路径  
-quality = Improved  # Fast/Improved/Enhanced
-output_height = full resolution
-
-[PADDING]  # 面部裁剪边距
-u = 0  # 上
-d = 0  # 下  
-l = 0  # 左
-r = 0  # 右
-
-[MASK]  # 遮罩设置
-size = 2.5        # 遮罩大小
-feathering = 2    # 羽化程度
-mouth_tracking = False  # 嘴部跟踪
-```
-
-### 4.4 图像增强类 (`enhance.py`)
+### 4.3 图像增强类 (`enhance.py`)
 ```python
 def load_sr():
     # 加载 GFPGAN 超分辨率模型
@@ -132,7 +109,6 @@ def upscale(image, properties):
 ## 5. 重要说明
 
 ### 5.1 性能优化要点
-- **面部跟踪数据缓存**：相同视频的面部检测结果会被保存，大幅提升重复处理速度
 - **批处理支持**：支持多文件批量处理，提高工作效率
 - **分辨率自适应**：支持全分辨率、半分辨率和自定义分辨率输出
 
