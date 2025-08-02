@@ -67,6 +67,8 @@ conda install -c conda-forge cmake dlib -y
 2. 运行 `python inference_cn.py`
 3. 等待处理完成，输出文件保存在视频同目录下
 
+数字人GUI
+`python lipApp.py`
 ## 4. 项目核心类解读
 
 ### 4.1 Wav2Lip 模型类 (`models/wav2lip.py`)
