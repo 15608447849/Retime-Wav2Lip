@@ -4,6 +4,8 @@ import time
 import logging
 import os
 import sys
+from time import sleep
+
 import numpy as np
 import pyaudio
 import requests
@@ -15,7 +17,7 @@ from collections import deque
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-fps = 30
+fps = 24
 delay_seconds = 5
 
 class FramePlayer:
@@ -29,11 +31,13 @@ class FramePlayer:
         self.capture_thread = None
 
         # 初始化帧缓存系统
-        self.frame_chunk_buffer = None
+        self.frame_chunk_buffer = deque()
+        buffer_size = fps * delay_seconds  # 30fps * 5秒 = 150帧
+        # 预填充空帧和空音频块，确保延迟效果
+        for i in range(buffer_size):
+            self.frame_chunk_buffer.append((None, None))
 
-        # 重置延迟缓存
-        self.init_delay_frame_chunk_buffer()
-
+        self.skipnum = 0
         self.play_thread = threading.Thread(target=self.play_frame, daemon=True)
         self.play_thread.start()
 
@@ -74,7 +78,11 @@ class FramePlayer:
         """视频捕获"""
         try:
             while self.capture:
-
+                # logger.info(f"视频捕获 len(self.frame_chunk_buffer)={len(self.frame_chunk_buffer)}")
+                if len(self.frame_chunk_buffer) > (delay_seconds*fps) :
+                    sec = (len(self.frame_chunk_buffer) - delay_seconds*fps) / fps
+                    # logger.info(f"等待音频数据 sec={sec}")
+                    sleep( sec )
                 # 读取一帧图像数据
                 ret, frame = self.capture.read()
                 if not ret:
@@ -85,10 +93,21 @@ class FramePlayer:
                     else:
                         # 摄像头无数据，退出循环
                         break
-                # frame = cv2.imread('res/my.jpg')
+                if self.skipnum >0 :
+                    self.skipnum -= 1
+                    continue
+                    # frame = cv2.imread('res/my.jpg')
                 if self.lip:
                     try:
+                        s1 = time.perf_counter()
                         frame, chunk = self.lip.synced_frame(frame)
+                        s2 = time.perf_counter()
+                        if(s2 - s1 ) > (1 / fps) :
+                            logging.info(f"synced_frame time: {s2 - s1:.6f}s")
+                            # 跳帧处理
+                            self.skipnum =  max(int( ( (s2 - s1)-(1 / fps) ) / (1 / fps)) , 1)
+                            logger.info(f"跳帧: {self.skipnum}")
+
                         self.add_frame_chunk_buffer(frame, chunk)
                         continue
                     except Exception as e:
@@ -103,13 +122,38 @@ class FramePlayer:
                 try:
                     if self.frame_callback:
                         frame, chunk = self.get_frame_chunk_buffer()
-
                         if frame is not None:
+                            # 计算延迟秒数
+                            delay_sec = int(len(self.frame_chunk_buffer) / fps)
+                            # logger.info(f"延迟: {delay_sec} 秒")
+
+                            # 准备文本信息
+                            text = f"FPS:{fps} delay: {delay_sec}s "
+                            font = cv2.FONT_HERSHEY_SIMPLEX
+                            font_scale = 0.6
+                            color = (0, 255, 0)  # 绿色
+                            thickness = 2
+                            line_type = cv2.LINE_AA
+                            # 背景颜色（半透明黑色）
+                            bg_color = (0, 0, 0)
+                            text_size = cv2.getTextSize(text, font, font_scale, thickness)
+                            max_width = text_size[0][0]
+                            text_height = text_size[0][1]
+                            overlay = frame.copy()
+                            bg_height = text_height + 20
+                            cv2.rectangle(overlay, (5, 5), (max_width + 20, bg_height), bg_color, -1)
+                            alpha = 0.7
+                            cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0, frame)
+                            y_offset = 25
+                            cv2.putText(frame, text, (10, y_offset), font, font_scale, color, thickness, line_type)
+
                             self.frame_callback(frame, chunk)
+
                 except Exception as e:
                     logger.error(f"播放延迟音视频错误: {e}")
 
                 time.sleep(1 / fps)
+
             logger.info("播放延迟音视频线程结束")
         except Exception as e:
             logger.error(f"播放延迟音视频线程致命错误: {e}")
@@ -119,17 +163,7 @@ class FramePlayer:
         if self.play_thread:
             self.play_thread = None
 
-    def init_delay_frame_chunk_buffer(self):
-        '''重置缓存列表 添加空帧 用于延迟播放'''
-        # 计算缓存大小：fps * 延迟秒数
-        buffer_size = fps * delay_seconds  # 30 * 5 = 150帧
 
-        # 使用deque创建缓冲区
-        self.frame_chunk_buffer = deque()
-
-        # 预填充空帧和空音频块，确保延迟效果
-        for i in range(buffer_size):
-            self.frame_chunk_buffer.append((None, None))
 
     def add_frame_chunk_buffer(self, frame, chunk):
         ''' 添加帧及音频缓存'''

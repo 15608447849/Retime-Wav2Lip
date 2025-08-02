@@ -17,7 +17,7 @@ class LipSyncApp:
     def __init__(self, lip=None, tts=None, capture=None):
         self.root = tk.Tk()
         self.root.title("实时TTS唇形同步调试工具")
-        self.root.geometry("1280x720")
+        self.root.geometry("1920x1080")
 
         self.lip = lip
         self.tts = tts
@@ -218,7 +218,7 @@ class LipSyncApp:
         if frame is not None:
             try:
                 # 调整帧大小
-                frame = cv2.resize(frame, (int(1280 /2), int(1280 /2)))
+                frame = cv2.resize(frame, (int( 640*1.25 ), int(480 *1.25)))
 
                 # 转换颜色空间
                 frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)

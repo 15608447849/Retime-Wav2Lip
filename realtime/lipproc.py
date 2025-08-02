@@ -28,7 +28,6 @@ img_size = 96  #  Wav2Lip 模型输入图像尺寸 -训练时使用的是 96x96
 sample_rate = 16000
 
 
-
 face_mesh = mp.solutions.face_mesh.FaceMesh(
     static_image_mode=False,
     max_num_faces=1,
@@ -49,7 +48,7 @@ class LipSyncProcessor:
     mask_dilation 嘴部周围遮罩的大小
     mask_feathering 嘴部周围遮罩的羽化量
     """
-    def __init__(self,project_root, mask_dilation=50, mask_feathering=300):
+    def __init__(self,project_root, mask_dilation=80, mask_feathering=300):
 
         self.mask_dilation = mask_dilation
         self.mask_feathering = mask_feathering
@@ -81,12 +80,12 @@ class LipSyncProcessor:
         )
         logger.info(f'GFPGANer 超清晰度 加载成功')
 
-        with open(os.path.join(project_root,"checkpoints", "wav2lip.pk1"), "rb") as f:
+        with open(os.path.join(project_root,"checkpoints", "wav2lip_GAN.pk1"), "rb") as f:
             self.model = pickle.load(f)
             logger.info(f'Wav2Lip 唇音同步 加载成功')
 
         # self.model = Wav2Lip()
-        # checkpoint = torch.load(os.path.join(project_root, "checkpoints", "Wav2Lip.pth"))
+        # checkpoint = torch.load(os.path.join(project_root, "checkpoints", "Wav2Lip_GAN.pth"))
         # s = checkpoint["state_dict"]
         # new_s = {}
         # for k, v in s.items():
@@ -99,6 +98,7 @@ class LipSyncProcessor:
         self.audio_buffer = np.array([], dtype=np.float32)
         self.audio_queue = queue.Queue()
         self.warmup_system(project_root)
+
 
     # def receive_audio(self, audio_chunk):
     #     '''音频添加到缓冲区'''
@@ -162,32 +162,23 @@ class LipSyncProcessor:
 
         return mel, chunk
 
-    def model_process(self,image,mel):
-        # 对原图进行复制
-        frame = image.copy()
-        s1 = time.perf_counter()
-        # 人脸图片,坐标元组
-        face, coord = self.face_detect(frame).copy()
-        s2 = time.perf_counter()
-        logging.info(f"人脸检测耗时: {s2 - s1:.6f}s")
-        if face is not None:
-            return self.model_pred(mel, frame, face, coord)
-        return None
+
     def synced_frame(self,image):
         '''一帧画面 尝试同步'''
         mel, chunk = self.create_audio_mel()
         if mel is None:
-            time.sleep(0.03)
+
             return image, None
         try:
-            f = self.model_process(image,mel)
+
+            f = self.model_pred(mel, image)
             if f is not None:
                 return f,chunk
         except Exception as e:
             # import traceback
             # traceback.print_exc()
             logging.error(f"处理帧时发生错误: {e}")
-        time.sleep(0.03)
+
         return image,chunk
 
 
@@ -294,11 +285,13 @@ class LipSyncProcessor:
 
         return result_bgr
 
+
     def upscale(self,image):
         _, _, output =  self.run_params.enhance(
             image, has_aligned=False, only_center_face=False, paste_back=True
         )
         return output
+
 
     def face_detect(self,image):
         '''获取人脸矩形大小'''
@@ -311,13 +304,27 @@ class LipSyncProcessor:
         # logging.info(f'人脸矩形区域 box={box} landmarks={landmarks} score={score}')
         face_box = tuple(map(int, box))
         x1, y1, x2, y2 = face_box
-
+        # x1, y1, x2, y2 = x1+96, y1+100, x2-96, y2+10
         # 裁剪人脸区域
         face_image = image[y1:y2, x1:x2]
         # logging.info(f'人脸矩形区域 face_image={face_image.shape}')
         return [face_image, (y1, y2, x1, x2)]
 
-    def model_pred(self, mel, frame, face, coord):
+    def model_pred(self, mel, image):
+        frame = image.copy()
+
+        s1 = time.perf_counter()
+        # 人脸图片,坐标元组
+        face, coord = self.face_detect(frame) # .copy()
+        s2 = time.perf_counter()
+        # logging.info(f"人脸检测耗时: {s2 - s1:.6f}s")
+
+        # cv2.imshow('face',face)
+        # cv2.waitKey(0)
+
+
+        if face is None:
+            return frame
 
         # 调整人脸图片大小到模型输入尺寸96x96
         face = cv2.resize(face, (img_size, img_size))
@@ -344,14 +351,19 @@ class LipSyncProcessor:
         with torch.no_grad():
             pred = self.model(mel_batch, img_batch)
         s2 = time.perf_counter()
-        logging.info(f"模型推理耗时: {s2 - s1:.6f}s")
+        # logging.info(f"模型推理耗时: {s2 - s1:.6f}s")
+
         # 处理预测结果
         pred = pred.cpu().numpy().transpose(0, 2, 3, 1) * 255.0
         p, f, c = pred[0], frame, coord  # 预测结果 原图 嘴巴区域在原图的坐标
+
         y1, y2, x1, x2 = c
 
         # 调整预测结果尺寸
         p = cv2.resize(p.astype(np.uint8), (x2 - x1, y2 - y1))
+
+        # cv2.imshow('pred', p)
+        # cv2.waitKey(0)
 
         # s1 = time.perf_counter()
         # p = self.upscale(p)
@@ -363,14 +375,21 @@ class LipSyncProcessor:
         s1 = time.perf_counter()
         p = self.create_tracked_mask(p, cf)
         s2 = time.perf_counter()
-        logging.info(f"羽化遮罩耗时: {s2 - s1:.6f}s")
-        # 将处理后的嘴部区域放回原图
-        f[y1:y2, x1:x2] = p
+        # logging.info(f"羽化遮罩耗时: {s2 - s1:.6f}s")
 
-        s1 = time.perf_counter()
-        f = self.upscale(f)
-        s2 = time.perf_counter()
-        logging.info(f"超清晰度耗时: {s2 - s1:.6f}s")
+        # 将处理后的嘴部区域放回原图
+        try:
+            f[y1:y2, x1:x2] = p
+        except:
+
+            import traceback
+            traceback.print_exc()
+            logging.error(f"处理失败 face={face.shape} p={p.shape}")
+            cv2.imshow('pred', p)
+            cv2.waitKey(0)
+            return image
+
+
         return f
 
 
@@ -381,15 +400,16 @@ class LipSyncProcessor:
 
     def warmup_system(self,project_root):
         """系统预热：预热所有模型组件"""
-        print("=== 系统预热开始 ===")
+        logger.info("=== 系统预热开始 ===")
         #使用随机噪声mel
         mel = np.random.normal(0, 0.1, (80, 16)).astype(np.float32)
         mel = np.clip(mel, -5.0, 5.0)
         image = cv2.imread(os.path.join(project_root, "res", "my.jpg"))  # 使用您的测试图片
-        f = self.model_process(image,mel)
-        cv2.imshow('prev load', f)
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
+        f = self.model_pred(mel,image)
+
+        # cv2.imshow('prev load', f)
+        # cv2.waitKey(0)
+        # cv2.destroyAllWindows()
 
 
 
