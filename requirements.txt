@@ -21,6 +21,8 @@ basicsr==1.4.2
 batch-face==1.4.0
 gfpgan==1.3.8
 
+mediapipe==0.10.21
+
 # conda install -c conda-forge cmake ffmpeg  dlib -y
 # dlib==19.24.2
 
